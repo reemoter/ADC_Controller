@@ -23,10 +23,13 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include "stdbool.h"
+#include "stdlib.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+#define RX_BUF	10
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -49,17 +52,29 @@ UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 uint16_t Tim_flag;
+uint16_t Pim_flag;
 
 uint8_t rx_data;
-uint8_t rx_flag;
 
-char data_arr[10] = "";
+char data_arr[RX_BUF] = "";
+char data_cmd[RX_BUF] = "";
 uint8_t idx;
 
 uint8_t dbg_flag;
 uint8_t sts_flag;
 
 uint16_t value;
+
+uint8_t cmd_i = 0;
+
+struct pvalue
+{
+	uint8_t at;
+	uint8_t bt;
+	uint8_t ct;
+	uint8_t dt;
+	uint8_t et;
+}pg1;
 
 /* USER CODE END PV */
 
@@ -73,6 +88,7 @@ static void MX_TIM4_Init(void);
 static void MX_ADC2_Init(void);
 /* USER CODE BEGIN PFP */
 void Command_Access();
+void PWM_Update();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -118,11 +134,22 @@ int main(void)
 	HAL_TIM_Base_Start_IT(&htim3);
 
 	HAL_UART_Receive_IT(&huart3, &rx_data, 1);
-	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
 
-	rx_flag = 0;
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+
+	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
+	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+
 	dbg_flag = 0;
 	sts_flag = 0;
+
+	pg1.at = 0;
+	pg1.bt = 0;
+	pg1.ct = 0;
+	pg1.dt = 0;
+	pg1.et = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -131,6 +158,11 @@ int main(void)
 	{
 		Command_Access();
 
+		if(Pim_flag == 10)
+		{
+			Pim_flag = 0;
+			PWM_Update();
+		}
 		if(Tim_flag == 1000)
 		{
 			Tim_flag = 0;
@@ -314,6 +346,7 @@ static void MX_TIM3_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
 
@@ -321,7 +354,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 108-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 1000-1;
+  htim3.Init.Period = 100-1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -333,15 +366,28 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 50-1;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
 
 }
 
@@ -394,6 +440,18 @@ static void MX_TIM4_Init(void)
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -476,23 +534,54 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void Command_Access()
 {
+	strncpy(data_cmd, data_arr+2, 4);
+	data_cmd[3] = '\0';
+	//cmd_i = atoi(data_cmd);
+
 	if(data_arr[idx-1]== '\r' || data_arr[idx-1]== '\n')
 	{
 		data_arr[idx] = '\0';
-		dbg_flag = strncmp((char*)data_arr, "LED1", 4);
 		if(strncmp((char*)data_arr, "LED1", 4) == 0)
 		{
-			sts_flag = 1;
+			sts_flag = 11;
 			HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 		}else if(strncmp((char*)data_arr, "LED0", 4) == 0)
 		{
-			sts_flag = 0;
+			sts_flag = 12;
 			HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+		}
+
+		if(strncmp((char*)data_arr, "AT", 2) == 0){
+			pg1.at = atoi(data_cmd);
+			sts_flag = 1;
+		}if(strncmp((char*)data_arr, "BT", 2) == 0){
+			pg1.bt = atoi(data_cmd);
+			sts_flag = 2;
+		}if(strncmp((char*)data_arr, "CT", 2) == 0){
+			pg1.ct = atoi(data_cmd);
+			sts_flag = 3;
+		}if(strncmp((char*)data_arr, "DT", 2) == 0){
+			pg1.dt = atoi(data_cmd);
+			sts_flag = 4;
+		}if(strncmp((char*)data_arr, "ET", 2) == 0){
+			pg1.et = atoi(data_cmd);
+			sts_flag = 5;
+		}if(strncmp((char*)data_arr, "OC", 2) == 0){
+			sts_flag = 0;
 		}
 		idx = 0;
 	}
 }
 
+void PWM_Update()
+{
+	htim4.Instance->CCR1 = pg1.at;
+	htim4.Instance->CCR2 = pg1.bt;
+	htim4.Instance->CCR3 = pg1.ct;
+	htim4.Instance->CCR4 = pg1.dt;
+
+	htim3.Instance->CCR1 = pg1.et;
+}
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -508,6 +597,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	if(htim->Instance == htim3.Instance)
 	{
 		Tim_flag++;
+		Pim_flag++;
 	}
 }
 /* USER CODE END 4 */
