@@ -541,35 +541,44 @@ void Command_Access()
 	if(data_arr[idx-1]== '\r' || data_arr[idx-1]== '\n')
 	{
 		data_arr[idx] = '\0';
-		if(strncmp((char*)data_arr, "LED1", 4) == 0)
-		{
-			sts_flag = 11;
-			HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-		}else if(strncmp((char*)data_arr, "LED0", 4) == 0)
-		{
-			sts_flag = 12;
-			HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-		}
+		uint8_t cmd_z[] = "\r\n";
+		uint8_t sys_e[] = "\r\n Wrong Command!!\r\n";
 
 		if(strncmp((char*)data_arr, "AT", 2) == 0){
 			pg1.at = atoi(data_cmd);
 			sts_flag = 1;
-		}if(strncmp((char*)data_arr, "BT", 2) == 0){
+		}else if(strncmp((char*)data_arr, "BT", 2) == 0){
 			pg1.bt = atoi(data_cmd);
 			sts_flag = 2;
-		}if(strncmp((char*)data_arr, "CT", 2) == 0){
+		}else if(strncmp((char*)data_arr, "CT", 2) == 0){
 			pg1.ct = atoi(data_cmd);
 			sts_flag = 3;
-		}if(strncmp((char*)data_arr, "DT", 2) == 0){
+		}else if(strncmp((char*)data_arr, "DT", 2) == 0){
 			pg1.dt = atoi(data_cmd);
 			sts_flag = 4;
-		}if(strncmp((char*)data_arr, "ET", 2) == 0){
+		}else if(strncmp((char*)data_arr, "ET", 2) == 0){
 			pg1.et = atoi(data_cmd);
 			sts_flag = 5;
-		}if(strncmp((char*)data_arr, "OC", 2) == 0){
+		}else if(strncmp((char*)data_arr, "OC", 2) == 0){
 			sts_flag = 0;
+		}else if(strncmp((char*)data_arr, "L1", 2) == 0){
+			sts_flag = 11;
+			HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+		}else if(strncmp((char*)data_arr, "L0", 2) == 0){
+			sts_flag = 12;
+			HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+		}else{
+			sts_flag = 0;
+			HAL_UART_Transmit(&huart3, (uint8_t*)sys_e, sizeof(sys_e), 10);
 		}
+		/*uint8_t sys_r[] = "";
+
+		if(sts_flag != 0){
+			sprintf(sys_r, "PORTA VALUE = %d", pg1.at);
+			HAL_UART_Transmit(&huart3, (uint8_t*)sys_r, sizeof(sys_r), 10);
+		}*/
 		idx = 0;
+		HAL_UART_Transmit(&huart3, (uint8_t*)cmd_z, sizeof(cmd_z), 10);
 	}
 }
 
@@ -588,7 +597,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	if (huart->Instance == huart3.Instance)
 	{
 		data_arr[idx++] = rx_data;
-		HAL_UART_Transmit(&huart3, &rx_data, 1, 10);
+		HAL_UART_Transmit(&huart3, &rx_data, 1, 1); //10
 		HAL_UART_Receive_IT(&huart3, &rx_data, 1);
 	}
 }
