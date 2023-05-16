@@ -25,11 +25,15 @@
 #include <string.h>
 #include "stdbool.h"
 #include "stdlib.h"
+
+#include "math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 #define RX_BUF	10
+#define PI		3.141592
+#define SAMPLES	200
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -44,6 +48,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc2;
 
+DAC_HandleTypeDef hdac;
+
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
@@ -51,6 +57,10 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
+uint16_t IV[SAMPLES];
+uint16_t dacv;
+uint8_t tick;
+
 uint16_t Tim_flag;
 uint16_t Pim_flag;
 
@@ -74,6 +84,8 @@ struct pvalue
 	uint8_t ct;
 	uint8_t dt;
 	uint8_t et;
+
+	uint8_t dav;
 }pg1;
 
 /* USER CODE END PV */
@@ -86,14 +98,25 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_ADC2_Init(void);
+static void MX_DAC_Init(void);
 /* USER CODE BEGIN PFP */
 void Command_Access();
 void PWM_Update();
+
+void DAC_Sample();
+void DAC_Drive();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+#ifdef __cplusplus
+extern "C" int _write(int32_t file, uint8_t *ptr, int32_t len) {
+#else
+	int _write(int32_t file, uint8_t *ptr, int32_t len) {
+#endif
+		if( HAL_UART_Transmit(&huart3, ptr, len, len) == HAL_OK ) return len;
+		else return 0;
+	}
 /* USER CODE END 0 */
 
 /**
@@ -129,6 +152,7 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_ADC2_Init();
+  MX_DAC_Init();
   /* USER CODE BEGIN 2 */
 	HAL_TIM_Base_Start_IT(&htim2);
 	HAL_TIM_Base_Start_IT(&htim3);
@@ -142,6 +166,8 @@ int main(void)
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
 
+	HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+
 	dbg_flag = 0;
 	sts_flag = 0;
 
@@ -150,14 +176,17 @@ int main(void)
 	pg1.ct = 0;
 	pg1.dt = 0;
 	pg1.et = 0;
+
+	DAC_Sample(100);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1)
 	{
-		Command_Access();
-
+		//Command_Access();
+		//DAC_Drive();
 		if(Pim_flag >= 10){
 			Pim_flag = 0;
 			PWM_Update();
@@ -281,6 +310,46 @@ static void MX_ADC2_Init(void)
   /* USER CODE BEGIN ADC2_Init 2 */
 
   /* USER CODE END ADC2_Init 2 */
+
+}
+
+/**
+  * @brief DAC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_DAC_Init(void)
+{
+
+  /* USER CODE BEGIN DAC_Init 0 */
+
+  /* USER CODE END DAC_Init 0 */
+
+  DAC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN DAC_Init 1 */
+
+  /* USER CODE END DAC_Init 1 */
+
+  /** DAC Initialization
+  */
+  hdac.Instance = DAC;
+  if (HAL_DAC_Init(&hdac) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** DAC channel OUT1 config
+  */
+  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN DAC_Init 2 */
+
+  /* USER CODE END DAC_Init 2 */
 
 }
 
@@ -440,6 +509,7 @@ static void MX_TIM4_Init(void)
   {
     Error_Handler();
   }
+  sConfigOC.Pulse = 1-1;
   if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -529,6 +599,8 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+
 void Command_Access()
 {
 	strncpy(data_cmd, data_arr+2, 4);
@@ -541,6 +613,8 @@ void Command_Access()
 
 		uint8_t sys_e[] = "\r\n Wrong Command!!\r\n";
 		uint8_t sys_a[] = "Applied !!\r\n";
+
+		uint8_t sys_b[64];
 
 		if(strncmp((char*)data_arr, "AT", 2) == 0){
 			pg1.at = atoi(data_cmd);
@@ -563,8 +637,16 @@ void Command_Access()
 			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
 			sts_flag = 5;
 		}else if(strncmp((char*)data_arr, "OC", 2) == 0){
-			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
-			sts_flag = 0;
+			//HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
+			sprintf(sys_b, "\r\nPORTA = %d \r\nPORTB = %d \r\nPORTC = %d \r\nPORTD = %d \r\nPORTE = %d \r\n",
+					pg1.at,
+					pg1.bt,
+					pg1.ct,
+					pg1.dt,
+					pg1.et);
+
+			HAL_UART_Transmit(&huart3,sys_b,sizeof(sys_b),10);
+			sts_flag = 10;
 		}else if(strncmp((char*)data_arr, "L1", 2) == 0){
 			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
 			sts_flag = 11;
@@ -573,18 +655,23 @@ void Command_Access()
 			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
 			sts_flag = 12;
 			HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+		}else if(strncmp((char*)data_arr, "CR", 2) == 0){
+			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
+			sts_flag = 0;
+			pg1.at = 0;
+			pg1.bt = 0;
+			pg1.ct = 0;
+			pg1.dt = 0;
+			pg1.et = 0;
+		}else if(strncmp((char*)data_arr, "DA", 2) == 0){
+			pg1.dav = atoi(data_cmd);
+			DAC_Sample(pg1.dav);
+			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
+			sts_flag = 13;
 		}else{
 			sts_flag = 0;
 			HAL_UART_Transmit(&huart3, (uint8_t*)sys_e, sizeof(sys_e), 10);
 		}
-
-
-		/*uint8_t sys_r[] = "";
-
-		if(sts_flag != 0){
-			sprintf(sys_r, "PORTA VALUE = %d", pg1.at);
-			HAL_UART_Transmit(&huart3, (uint8_t*)sys_r, sizeof(sys_r), 10);
-		}*/
 		idx = 0;
 		HAL_UART_Transmit(&huart3, (uint8_t*)cmd_z, sizeof(cmd_z), 1);
 	}
@@ -610,6 +697,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		HAL_UART_Transmit(&huart3, &rx_data, 1, 1); //10
 		HAL_UART_Receive_IT(&huart3, &rx_data, 1);
 	}
+	Command_Access();
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -618,8 +706,33 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	{
 		Tim_flag++;
 		Pim_flag++;
+
+		tick++;
+		if(tick >= 200){
+			tick = 0;
+		}
+		HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, IV[tick]);
+
 	}
 }
+
+void DAC_Sample(int s)
+{
+	for(int i=0; i < SAMPLES; i++){
+		//IV[i] = value < 4096 ? value : 4095;
+		//value = (uint16_t)rint((sinf(((2*PI)/SAMPLES)*i)+1)*2048);
+		dacv = (uint16_t)rint((sinf(((2*PI)/SAMPLES)*i)+1)*(2048 - s*20));
+		IV[i] = dacv < (4096 - s*40) ? dacv : (4096 - s*40)-1;
+	}
+}
+
+void DAC_Drive(){
+	for(int i=0; i < SAMPLES; i++)
+	{
+		HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, IV[i]);
+	}
+}
+
 /* USER CODE END 4 */
 
 /**
