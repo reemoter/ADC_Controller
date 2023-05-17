@@ -33,7 +33,7 @@
 /* USER CODE BEGIN PTD */
 #define RX_BUF	10
 #define PI		3.141592
-#define SAMPLES	200
+#define SAMPLES	200	//DAC Perind 10kHz / SAMPLES -> DAC Frequency
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -57,9 +57,9 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-uint16_t IV[SAMPLES];
-uint16_t dacv;
+int16_t IV[SAMPLES];
 uint8_t tick;
+int16_t dacv;
 
 uint16_t Tim_flag;
 uint16_t Pim_flag;
@@ -74,8 +74,6 @@ uint8_t dbg_flag;
 uint8_t sts_flag;
 
 uint16_t value;
-
-uint8_t cmd_i = 0;
 
 struct pvalue
 {
@@ -104,6 +102,7 @@ void Command_Access();
 void PWM_Update();
 
 void DAC_Sample();
+void HAC_Sample();
 void DAC_Drive();
 /* USER CODE END PFP */
 
@@ -420,7 +419,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 108-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 100-1;
+  htim3.Init.Period = 83-1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -668,6 +667,11 @@ void Command_Access()
 			DAC_Sample(pg1.dav);
 			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
 			sts_flag = 13;
+		}else if(strncmp((char*)data_arr, "HA", 2) == 0){
+			pg1.dav = atoi(data_cmd);
+			HAC_Sample(pg1.dav);
+			HAL_UART_Transmit(&huart3, (uint8_t*)sys_a, sizeof(sys_a), 10);
+			sts_flag = 14;
 		}else{
 			sts_flag = 0;
 			HAL_UART_Transmit(&huart3, (uint8_t*)sys_e, sizeof(sys_e), 10);
@@ -723,6 +727,17 @@ void DAC_Sample(int s)
 		//value = (uint16_t)rint((sinf(((2*PI)/SAMPLES)*i)+1)*2048);
 		dacv = (uint16_t)rint((sinf(((2*PI)/SAMPLES)*i)+1)*(2048 - s*20));
 		IV[i] = dacv < (4096 - s*40) ? dacv : (4096 - s*40)-1;
+	}
+}
+
+void HAC_Sample(int s)
+{
+	for(int i=0; i < SAMPLES; i++){
+		dacv = (uint16_t)rint((sinf(((2*PI)/SAMPLES)*i)+1)*(2048 - s*20));
+		IV[i] = dacv < (4096 - s*40) ? dacv - (2048 - s*20) : (2048 - s*20)-1;
+		for(int a = 100; a <= 199; a++){
+			IV[a] = IV[a - 100];
+		}
 	}
 }
 
